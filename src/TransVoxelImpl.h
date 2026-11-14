@@ -50,10 +50,10 @@ struct PolygonBlock : public BlockPolygons
 	float3 MaximalCorner;
 
 	virtual unsigned GetId() const override;
-	virtual const PolygonVertex* GetVertices(unsigned* count) const override;
-	virtual const unsigned* GetIndices(unsigned* count) const override;
-	virtual const PolygonVertex* GetTransitionVertices(TransitionFaceId face, unsigned* count) const override;
-	virtual const unsigned* GetTransitionIndices(TransitionFaceId face, unsigned* count) const override;
+	virtual const PolygonVertex* GetVertices(uint* count) const override;
+	virtual const unsigned* GetIndices(uint* count) const override;
+	virtual const PolygonVertex* GetTransitionVertices(TransitionFaceId face, uint* count) const override;
+	virtual const unsigned* GetTransitionIndices(TransitionFaceId face, uint* count) const override;
 
 	virtual float3 GetMinimalCorner() const override;
 	virtual float3 GetMaximalCorner() const override;
@@ -118,13 +118,13 @@ struct PolygonMap : public PolygonSurface
 	unsigned GetNextBlockId();
 
 	virtual float3 GetExtents() const override;
-	virtual unsigned GetLevelsCount() const override;
-	virtual unsigned GetBlocksForLevelCount(unsigned level) const override;
-	virtual const BlockPolygons* GetBlockForLevel(unsigned level, unsigned id) const override;
+	virtual uint GetLevelsCount() const override;
+	virtual uint GetBlocksForLevelCount(unsigned level) const override;
+	virtual const BlockPolygons* GetBlockForLevel(unsigned level, uint id) const override;
 	virtual const PolygonizationStatistics* GetStatistics() const override;
 	virtual void Destroy() override;
-	virtual unsigned GetCacheSizeBytes() const override;
-	virtual unsigned GetPolygonDataSizeBytes() const override;
+	virtual uint GetCacheSizeBytes() const override;
+	virtual uint GetPolygonDataSizeBytes() const override;
 private:
 	unsigned m_NextId;
 
@@ -134,7 +134,7 @@ private:
 
 struct MapModification : public Modification
 {
-	virtual const unsigned* GetModifiedBlocks(unsigned* count) const override;
+	virtual const unsigned* GetModifiedBlocks(uint* count) const override;
 	virtual void Destroy() override;
 
 	typedef std::vector<unsigned> BlockIds;

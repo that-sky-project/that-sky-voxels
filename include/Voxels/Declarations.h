@@ -3,6 +3,8 @@
 // Voxels Library, please see LICENSE for licensing details.
 #pragma once
 
+#include <cstddef>
+
 #ifdef _WIN32
 
 #ifdef VOXELS_DLL
@@ -24,3 +26,13 @@
 #pragma error Voxels currently supports Windows only.
 
 #endif
+
+namespace Voxels
+{
+
+/// Unsigned integer type used for sizes and counts.
+/// It maps to size_t so that values coming from containers
+/// (std::vector::size, std::string::size, etc.) fit without narrowing.
+typedef std::size_t uint;
+
+}

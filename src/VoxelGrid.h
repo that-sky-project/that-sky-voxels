@@ -111,7 +111,7 @@ private:
 	static bool CompressBlock(const Type* data, std::vector<Type>& compressed, bool* const isEmpty = nullptr);
 
 	template<typename Type>
-	static void DecompressBlock(const Type* data, unsigned sz, bool isUncompressed, Type* output);
+	static void DecompressBlock(const Type* data, uint sz, bool isUncompressed, Type* output);
 
 	typedef std::pair<glm::vec3, glm::vec3> BlockExtents;
 	typedef std::pair<unsigned, BlockExtents> TouchedBlock;

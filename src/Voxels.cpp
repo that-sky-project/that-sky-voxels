@@ -32,7 +32,10 @@ Voxels::VoxelsDeallocate_f voxel_deallocate = &DefaultDeallocate;
 Voxels::VoxelsAllocateAligned_f voxel_alloc_aligned = &DefaultAllocateAligned;
 Voxels::VoxelsDeallocateAligned_f voxel_dealloc_aligned = &DefaultDeallocateAligned;
 
-Voxels::InitError InitializeVoxels(int version, Voxels::LogMessage logger, Voxels::VoxelsAllocators* allocators)
+extern "C" VOXELS_API Voxels::InitError VOXELS_CALL InitializeVoxels(
+	int version,
+	Voxels::LogMessage logger,
+	Voxels::VoxelsAllocators *allocators)
 {
 	// allow the patch and build version to differ
 	if ((VOXELS_VERSION & 0xFFFF) != (version & 0xFFFF)) {
@@ -59,7 +62,7 @@ Voxels::InitError InitializeVoxels(int version, Voxels::LogMessage logger, Voxel
 	return Voxels::IE_Ok;
 }
 
-void DeinitializeVoxels()
+extern "C" VOXELS_API void VOXELS_CALL DeinitializeVoxels()
 {
 	VOXLOG(LS_Info, "Voxels library deinitialized");
 	Voxels::Logger::Destroy();
@@ -70,7 +73,7 @@ void DeinitializeVoxels()
 	voxel_dealloc_aligned = &DefaultDeallocateAligned;
 }
 
-unsigned GetBuildVersion()
+extern "C" VOXELS_API unsigned VOXELS_CALL GetBuildVersion()
 {
 	return VOXELS_VERSION;
 }

@@ -38,7 +38,7 @@ public:
 		virtual void Destroy() = 0;
 		/// Returns the size in bytes of the packed grid
 		/// @return size in bytes
-		virtual unsigned GetSize() const = 0;
+		virtual uint GetSize() const = 0;
 		/// Returns the pointer to the data in the packed grid
 		/// @return pointer to the pack
 		virtual const char* GetData() const = 0;
@@ -74,7 +74,7 @@ public:
 	/// @param blob pointer to the packed grid
 	/// @param size of the memoty blob
 	/// @return the newly created grid
-	static Grid* Load(const char* blob, unsigned size);
+	static Grid* Load(const char* blob, uint size);
 
 	/// Destroys the voxel grid
 	///
@@ -146,7 +146,7 @@ public:
 
 	/// Returns the amount of memory used for the compressed blocks in the grid
 	/// @return memory size in bytes
-	unsigned GetGridBlocksMemorySize();
+	uint GetGridBlocksMemorySize();
 
 	VoxelGrid* GetInternalRepresentation() const;
 

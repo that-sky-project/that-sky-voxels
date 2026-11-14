@@ -19,7 +19,7 @@ struct PackedGridImpl : public Grid::PackedGrid
 		delete this;
 	}
 
-	virtual unsigned GetSize() const override
+	virtual uint GetSize() const override
 	{
 		return Data.size();
 	}
@@ -264,9 +264,9 @@ Grid::PackedGrid* VoxelGrid::PackForSave() const
 {
 		std::unique_ptr<PackedGridImpl> pack(new PackedGridImpl);
 
-	unsigned offset = 0;
+	uint offset = 0;
 
-	auto write = [&pack, &offset](const void* data, unsigned size) {
+	auto write = [&pack, &offset](const void* data, uint size) {
 		pack->Data.resize(pack->Data.size() + size);
 		::memcpy(&pack->Data[pack->Data.size() - size], (const char*)data, size);
 		offset += size;
@@ -284,13 +284,13 @@ Grid::PackedGrid* VoxelGrid::PackForSave() const
 	unsigned blockSz = 0;
 	for (auto block = m_Blocks.cbegin(); block != m_Blocks.cend(); ++block)
 	{
-		blockSz = block->DistanceData.size();
+		blockSz = unsigned(block->DistanceData.size());
 		write(&blockSz, sizeof(blockSz));
 
-		blockSz = block->MaterialData.size();
+		blockSz = unsigned(block->MaterialData.size());
 		write(&blockSz, sizeof(blockSz));
 
-		blockSz = block->BlendData.size();
+		blockSz = unsigned(block->BlendData.size());
 		write(&blockSz, sizeof(blockSz));
 	}
 
@@ -663,7 +663,7 @@ bool VoxelGrid::CompressBlock(const Type* data, std::vector<Type>& compressed, b
 }
 
 template<typename Type>
-void VoxelGrid::DecompressBlock(const Type* data, unsigned sz, bool isUncompressed, Type* output)
+void VoxelGrid::DecompressBlock(const Type* data, uint sz, bool isUncompressed, Type* output)
 {
 	if (!isUncompressed) {
 		unsigned char length = 0;
@@ -791,7 +791,7 @@ Grid* Grid::Create(unsigned w, const char* heightmap)
 	return new Grid(impl.release());
 }
 
-Grid* Grid::Load(const char* blob, unsigned size)
+Grid* Grid::Load(const char* blob, uint size)
 {
 	return new Grid(VoxelGrid::Load(blob));
 }
@@ -904,9 +904,9 @@ VoxelGrid* Grid::GetInternalRepresentation() const
 	return m_InternalGrid;
 }
 
-unsigned Grid::GetGridBlocksMemorySize()
+uint Grid::GetGridBlocksMemorySize()
 {
-	return unsigned(m_InternalGrid->MemoryForGrid());
+	return m_InternalGrid->MemoryForGrid();
 }
 
 }

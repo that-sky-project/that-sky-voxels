@@ -82,7 +82,7 @@ glm::vec3 normalizeFixZero(const glm::vec3& in)
 }
 
 ///////// PRIVATE ////////////
-const unsigned* MapModification::GetModifiedBlocks(unsigned* count) const
+const unsigned* MapModification::GetModifiedBlocks(uint* count) const
 {
 	const auto sz = ModifiedBlocks.size();
 	if (count)
@@ -150,17 +150,17 @@ float3 PolygonMap::GetExtents() const
 	return float3(Extents.x, Extents.y, Extents.z);
 }
 
-unsigned PolygonMap::GetLevelsCount() const
+uint PolygonMap::GetLevelsCount() const
 {
 	return Levels.size();
 }
 
-unsigned PolygonMap::GetBlocksForLevelCount(unsigned level) const
+uint PolygonMap::GetBlocksForLevelCount(unsigned level) const
 {
 	return Levels[level].Blocks.size();
 }
 
-const BlockPolygons* PolygonMap::GetBlockForLevel(unsigned level, unsigned id) const
+const BlockPolygons* PolygonMap::GetBlockForLevel(unsigned level, uint id) const
 {
 	if (id >= Levels[level].Blocks.size())
 		return nullptr;
@@ -172,7 +172,7 @@ const PolygonizationStatistics* PolygonMap::GetStatistics() const
 	return &Stats;
 }
 
-unsigned PolygonMap::GetCacheSizeBytes() const
+uint PolygonMap::GetCacheSizeBytes() const
 {
 	size_t total = 0;
 	for (auto blockCache = Cache.Level0ConsistencyCache.cbegin(), blockEnd = Cache.Level0ConsistencyCache.cend(); blockCache != blockEnd; ++blockCache)
@@ -195,10 +195,10 @@ unsigned PolygonMap::GetCacheSizeBytes() const
 		}
 	}
 
-	return unsigned(total);
+	return total;
 }
 
-unsigned PolygonMap::GetPolygonDataSizeBytes() const
+uint PolygonMap::GetPolygonDataSizeBytes() const
 {
 	size_t result = 0;
 	for (auto level = Levels.cbegin(), levEnd = Levels.cend(); level != levEnd; ++level) {
@@ -210,7 +210,7 @@ unsigned PolygonMap::GetPolygonDataSizeBytes() const
 		}
 	}
 
-	return unsigned(result);
+	return result;
 }
 
 void PolygonMap::Destroy()
@@ -261,7 +261,7 @@ unsigned PolygonBlock::GetId() const
 	return Id;
 }
 
-const PolygonVertex* PolygonBlock::GetVertices(unsigned* count) const
+const PolygonVertex* PolygonBlock::GetVertices(uint* count) const
 {
 	const auto sz = Vertices.size();
 	if (count)
@@ -269,7 +269,7 @@ const PolygonVertex* PolygonBlock::GetVertices(unsigned* count) const
 	return sz ? &Vertices[0] : nullptr;
 }
 
-const unsigned* PolygonBlock::GetIndices(unsigned* count) const
+const unsigned* PolygonBlock::GetIndices(uint* count) const
 {
 	const auto sz = Indices.size();
 	if (count)
@@ -277,7 +277,7 @@ const unsigned* PolygonBlock::GetIndices(unsigned* count) const
 	return sz ? &Indices[0] : nullptr;
 }
 
-const PolygonVertex* PolygonBlock::GetTransitionVertices(TransitionFaceId face, unsigned* count) const
+const PolygonVertex* PolygonBlock::GetTransitionVertices(TransitionFaceId face, uint* count) const
 {
 	const auto sz = TransitionVertices[face].size();
 	if (count)
@@ -285,7 +285,7 @@ const PolygonVertex* PolygonBlock::GetTransitionVertices(TransitionFaceId face, 
 	return sz ? &TransitionVertices[face][0] : nullptr;
 }
 
-const unsigned* PolygonBlock::GetTransitionIndices(TransitionFaceId face, unsigned* count) const
+const unsigned* PolygonBlock::GetTransitionIndices(TransitionFaceId face, uint* count) const
 {
 	const auto sz = TransitionIndices[face].size();
 	if (count)
@@ -1433,7 +1433,7 @@ private:
 		onboundary.asInt = cell.CornerOnBlockBoundary(v);
 		block.Vertices.push_back(glm::vec4(V, onboundary.asFloat));
 
-		return block.Vertices.size() - 1;
+		return unsigned(block.Vertices.size() - 1);
 	};
 
 	static unsigned MakeReuseId(const Coord& reuseCoord) {
@@ -1670,7 +1670,7 @@ private:
 								}
 								block.Normals.push_back(normalizeFixZero( N0 * (t/256.f) + N1 * (u/256.f)) );
 
-								auto index = block.Vertices.size() - 1;
+								auto index = unsigned(block.Vertices.size() - 1);
 
 								// save the index in this cell's reuse data
 								if(direction == 0x8)
@@ -2056,7 +2056,7 @@ private:
 							block.TransitionMeshSecondaryVertices[transitionId].push_back(QSec);
 							block.TransitionMeshNormals[transitionId].push_back(normal);
 
-							auto index = block.TransitionMeshVertices[transitionId].size() - 1;
+							auto index = unsigned(block.TransitionMeshVertices[transitionId].size() - 1);
 							cellIndices.push_back(index);
 
 							if(addForReuse && reuseDirection == 8) {
