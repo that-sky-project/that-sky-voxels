@@ -40,8 +40,7 @@ typedef union {
 	int asInt;
 } FloatInt;
 
-#ifdef PROFI_ENABLE
-static const char* LEVEL_STRS[] = 
+#ifdef static const char* LEVEL_STRS[] = 
 {
 	"Polygonize block Level 0",
 	"Polygonize block Level 1",
@@ -465,8 +464,6 @@ struct TransVoxelRun
 	
 	ResultType* Execute()
 	{
-		PROFI_SCOPE(m_Result ? "Polygonize partial" : "Polygonize full")
-
 		const auto gridWidth = m_Grid.GetWidth();
 		const auto gridDepth = m_Grid.GetDepth();
 		const auto gridHeight = m_Grid.GetHeight();
@@ -966,8 +963,6 @@ private:
 
 	Cell MakeCell(const Coord& globalCoords, unsigned levelMultiplier)
 	{
-		PROFI_SCOPE_S3("MakeCell - coords")
-
 			Cell result;
 		result.Base = globalCoords;
 		result.LevelMultiplier = levelMultiplier;
@@ -1049,8 +1044,6 @@ private:
 
 	Cell MakeCell(const Block& block, const Coord& localCoords)
 	{
-		PROFI_SCOPE_S3("MakeCell - block")
-
 			Cell result;
 		result.Base = Coord((localCoords.x + block.Coords.x * BLOCK_EXTENT) * block.LevelMultiplier
 			, (localCoords.y + block.Coords.y * BLOCK_EXTENT) * block.LevelMultiplier
@@ -1122,7 +1115,6 @@ private:
 			}
 			if (!blockFound)
 			{
-				PROFI_SCOPE_S3("Fetch distance block");
 				m_Grid.GetBlockData(blockCoordsf3, m_Cache[m_CacheToEvict]);
 				m_CachedBlocks[m_CacheToEvict].first = blockLevel;
 				m_CachedBlocks[m_CacheToEvict].second = blockId;
@@ -1172,7 +1164,6 @@ private:
 			}
 			if (!materialBlockFound)
 			{
-				PROFI_SCOPE_S3("Fetch material block")
 				const auto vec3coords = glm::vec3(blockCoordsf3.x, blockCoordsf3.y, blockCoordsf3.z);
 				m_Grid.GetMaterialBlockData(vec3coords,
 					(unsigned char*)(m_MaterialCache[m_MaterialCacheToEvict]),
@@ -1263,7 +1254,6 @@ private:
 	
 	void PushBlocksToResult()
 	{
-		PROFI_SCOPE_S2("Push blocks to result")
 		const float normFactor = 1 / 256.f;
 		const float transitionNormFactor = 1 / 256.f;
 
@@ -1514,9 +1504,9 @@ private:
 		for (int y = -1; y < 2; ++y)
 		for (int x = -1; x < 2; ++x)
 		{
-			glm::vec3 coord = glm::vec3(StMath::clamp_value(block.Coords.x + x, 0.f, m_BlockCounts[0].x - 1),
-				StMath::clamp_value(block.Coords.y + y, 0.f, m_BlockCounts[0].y - 1),
-				StMath::clamp_value(block.Coords.z + z, 0.f, m_BlockCounts[0].z - 1));
+			glm::vec3 coord = glm::vec3(std::clamp(block.Coords.x + x, 0.f, m_BlockCounts[0].x - 1),
+				std::clamp(block.Coords.y + y, 0.f, m_BlockCounts[0].y - 1),
+				std::clamp(block.Coords.z + z, 0.f, m_BlockCounts[0].z - 1));
 			if (!m_Grid.IsBlockEmpty(coord))
 				return false;
 		}
@@ -1526,9 +1516,6 @@ private:
 
 	void PolygonizeBlock(Block& block, PolygonMap& outputMap)
 	{			
-		PROFI_SCOPE_S2("Polygonize block")
-
-		PROFI_SCOPE_S3(LEVEL_STRS[block.Level])
 		unsigned verticesIndices[15];
 		
 		assert(BLOCK_EXTENT == BLOCK_EXTENT && BLOCK_EXTENT == BLOCK_EXTENT);
@@ -1751,8 +1738,6 @@ private:
 
 	void GenerateTransitionCells(Block& block)
 	{
-		PROFI_SCOPE_S2("Generate transition cells")
-
 		int row = 0, highRow = 0;
 		int column = 0, highColumn = 0;
 		const int minDim = 0;
