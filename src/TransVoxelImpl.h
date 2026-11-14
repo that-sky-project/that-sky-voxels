@@ -4,7 +4,7 @@
 #pragma once
 #include "VoxelGrid.h"
 
-#include "..\include\Polygonizer.h"
+#include "Voxels/Polygonizer.h"
 
 namespace Voxels
 {

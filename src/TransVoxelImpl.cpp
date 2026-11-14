@@ -8,8 +8,6 @@
 #include "Voxels/MaterialMap.h"
 #include "Voxels/Grid.h"
 
-#include <../dx11-framework/Utilities/MathInlines.h>
-
 #include "StdAllocatorAligned.h"
 #include "StructConversions.h"
 #include "Aligned.h"

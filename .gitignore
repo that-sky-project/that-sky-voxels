@@ -4,6 +4,9 @@ dist/
 .vscode/
 .idea/
 
+test/
+test.*
+
 *.a
 *.o
 *.obj

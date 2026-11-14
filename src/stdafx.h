@@ -21,8 +21,6 @@
 
 #include <glm/glm.hpp>
 
-#include <profi_decls.h>
-#include <profi.h>
 #include "Voxels/Declarations.h"
 #include "Voxels/Library.h"
 

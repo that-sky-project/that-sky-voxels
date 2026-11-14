@@ -5,7 +5,6 @@
 
 #include "VoxelGrid.h"
 #include "Voxels/VoxelSurface.h"
-#include <../dx11-framework/Utilities/MathInlines.h>
 
 #define SETFLAG(Flag, Bit) ((Flag) |= (Bit))
 #define UNSETFLAG(Flag, Bit) ((Flag) &= ~(Bit))
@@ -36,7 +35,7 @@ struct PackedGridImpl : public Grid::PackedGrid
 
 inline char round(float value)
 {
-	return char(StMath::min_value(StMath::max_value((float)std::numeric_limits<char>::min(), ceil(std::abs(value) /*+ 0.5f*/)) * (value > 0 ? 1 : -1), (float)std::numeric_limits<char>::max()));
+	return char(std::min(std::max((float)std::numeric_limits<char>::min(), ceil(std::abs(value) /*+ 0.5f*/)) * (value > 0 ? 1 : -1), (float)std::numeric_limits<char>::max()));
 }
 
 inline char toGridDistValue(char value)
@@ -84,8 +83,6 @@ VoxelGrid::VoxelGrid(unsigned w, unsigned d, unsigned h,
 	, m_Height(h)
 	, m_MemoryForBlocks(0)
 {
-	PROFI_FUNC
-
 	// Create per-block data
 	auto blocksX = m_Width / BLOCK_EXTENTS;
 	auto blocksY = m_Depth / BLOCK_EXTENTS;
@@ -137,7 +134,6 @@ VoxelGrid::VoxelGrid(unsigned w, unsigned d, unsigned h)
 	, m_Height(h)
 	, m_MemoryForBlocks(0)
 {
-	PROFI_FUNC
 	// Create per-block data
 	auto blocksX = m_Width / BLOCK_EXTENTS;
 	auto blocksY = m_Depth / BLOCK_EXTENTS;
@@ -162,8 +158,7 @@ VoxelGrid::VoxelGrid(unsigned w, const char* heightmap)
 	, m_Height(w)
 	, m_MemoryForBlocks(0)
 {
-	PROFI_FUNC
-	// Create per-block data
+		// Create per-block data
 	auto blocksX = m_Width / BLOCK_EXTENTS;
 	auto blocksY = m_Depth / BLOCK_EXTENTS;
 	auto blocksZ = m_Height / BLOCK_EXTENTS;
@@ -196,7 +191,7 @@ VoxelGrid::VoxelGrid(unsigned w, const char* heightmap)
 					const auto column = blockColumn + x;
 					const auto row = blockRow + y;
 
-					char height = (char)StMath::clamp_value<int>((int)slice - (int)heightmap[row * w + column], -127, 127);
+					char height = (char)std::clamp<int>((int)slice - (int)heightmap[row * w + column], -127, 127);
 
 					blockData.push_back(toGridDistValue(height));
 
@@ -214,8 +209,7 @@ VoxelGrid::VoxelGrid(unsigned w, const char* heightmap)
 
 VoxelGrid* VoxelGrid::Load(const char* data)
 {
-	PROFI_FUNC
-	const char* dataPtr = data;
+		const char* dataPtr = data;
 
 	auto read = [&dataPtr](char* output, unsigned sz){
 		::memcpy(output, dataPtr, sz);
@@ -268,8 +262,7 @@ VoxelGrid* VoxelGrid::Load(const char* data)
 
 Grid::PackedGrid* VoxelGrid::PackForSave() const
 {
-	PROFI_FUNC
-	std::unique_ptr<PackedGridImpl> pack(new PackedGridImpl);
+		std::unique_ptr<PackedGridImpl> pack(new PackedGridImpl);
 
 	unsigned offset = 0;
 
@@ -375,13 +368,13 @@ void VoxelGrid::CalculateTouchedBlockSection(
 	const glm::vec3 extDiv2(extents.x / 2, extents.y / 2, extents.z / 2);
 	const glm::vec3 initialChangePos = position - extDiv2;
 
-	start = glm::vec3(StMath::clamp_value(initialChangePos.x, blockExt.first.x, blockExt.second.x) - blockExt.first.x,
-					StMath::clamp_value(initialChangePos.y, blockExt.first.y, blockExt.second.y) - blockExt.first.y,
-					StMath::clamp_value(initialChangePos.z, blockExt.first.z, blockExt.second.z) - blockExt.first.z);
+	start = glm::vec3(std::clamp(initialChangePos.x, blockExt.first.x, blockExt.second.x) - blockExt.first.x,
+					std::clamp(initialChangePos.y, blockExt.first.y, blockExt.second.y) - blockExt.first.y,
+					std::clamp(initialChangePos.z, blockExt.first.z, blockExt.second.z) - blockExt.first.z);
 
-	end = glm::vec3(StMath::clamp_value(initialChangePos.x + extents.x, blockExt.first.x, blockExt.second.x) - blockExt.first.x,
-					StMath::clamp_value(initialChangePos.y + extents.y, blockExt.first.y, blockExt.second.y) - blockExt.first.y,
-					StMath::clamp_value(initialChangePos.z + extents.z, blockExt.first.z, blockExt.second.z) - blockExt.first.z);
+	end = glm::vec3(std::clamp(initialChangePos.x + extents.x, blockExt.first.x, blockExt.second.x) - blockExt.first.x,
+					std::clamp(initialChangePos.y + extents.y, blockExt.first.y, blockExt.second.y) - blockExt.first.y,
+					std::clamp(initialChangePos.z + extents.z, blockExt.first.z, blockExt.second.z) - blockExt.first.z);
 
 }
 
@@ -391,8 +384,7 @@ std::pair<glm::vec3, glm::vec3> VoxelGrid::InjectSurface(
 	VoxelSurface* surface,
 	InjectionType type)
 {
-	PROFI_FUNC
-	std::vector<TouchedBlock> touchedBlocks;
+		std::vector<TouchedBlock> touchedBlocks;
 	IdentifyTouchedBlocks(position, extents, touchedBlocks);
 
 	std::vector<char> newCompressed;
@@ -441,13 +433,13 @@ std::pair<glm::vec3, glm::vec3> VoxelGrid::InjectSurface(
 			switch (type)
 			{
 			case IT_Add:
-				finalValue = round(StMath::min_value((float)value, surfaceValue));
+				finalValue = round(std::min((float)value, surfaceValue));
 				break;
 			case IT_SubtractAddInner:
-				finalValue = round(StMath::max_value((float)value, surfaceValue));
+				finalValue = round(std::max((float)value, surfaceValue));
 				break;
 			case IT_Subtract:
-				finalValue = round(StMath::max_value(-surfaceValue, (float)value));
+				finalValue = round(std::max(-surfaceValue, (float)value));
 				break;
 			}
 
@@ -477,12 +469,12 @@ std::pair<glm::vec3, glm::vec3> VoxelGrid::InjectSurface(
 	const glm::vec3 initialChangePos = position - (extents / 2.0f);
 	
 	// DX- style coords!
-	const auto globalStart = glm::vec3(StMath::max_value(0.f, initialChangePos.x),
-		StMath::max_value(0.f, initialChangePos.z),
-		StMath::max_value(0.f, initialChangePos.y));
-	const auto globalEnd = glm::vec3(StMath::min_value(float(m_Width), globalStart.x + extents.x),
-		StMath::min_value(float(m_Height), globalStart.y + extents.z),
-		StMath::min_value(float(m_Depth), globalStart.z + extents.y));
+	const auto globalStart = glm::vec3(std::max(0.f, initialChangePos.x),
+		std::max(0.f, initialChangePos.z),
+		std::max(0.f, initialChangePos.y));
+	const auto globalEnd = glm::vec3(std::min(float(m_Width), globalStart.x + extents.x),
+		std::min(float(m_Height), globalStart.y + extents.z),
+		std::min(float(m_Depth), globalStart.z + extents.y));
 
 	return std::make_pair(globalStart, globalEnd);
 }
@@ -493,8 +485,7 @@ std::pair<glm::vec3, glm::vec3> VoxelGrid::InjectMaterial(
 	MaterialId material,
 	bool addSubtractBlend)
 {
-	PROFI_FUNC
-	std::vector<TouchedBlock> touchedBlocks;
+		std::vector<TouchedBlock> touchedBlocks;
 	IdentifyTouchedBlocks(position, extents, touchedBlocks);
 
 	const glm::vec3 extDiv2(extents / 2.0f);
@@ -535,13 +526,13 @@ std::pair<glm::vec3, glm::vec3> VoxelGrid::InjectMaterial(
 			const auto voxelId = VoxelIdInBlock(unsigned(x), unsigned(y), unsigned(z));
 			const auto dist = glm::length(currentPosition - position) / extDivCoeff.x;
 
-			auto outputBlend = (unsigned char)(StMath::min_value(1.f, StMath::max_value(0.f, (1 - dist))) * 255.f);
+			auto outputBlend = (unsigned char)(std::min(1.f, std::max(0.f, (1 - dist))) * 255.f);
 
 			auto& currentMaterial = materialBytes[voxelId];
 			auto& currentBlend = blendBytes[voxelId];
 
 			if (currentMaterial == material) {
-				currentBlend = StMath::max_value(0, StMath::min_value(255, (addSubtractBlend ? 1 : -1) * outputBlend + currentBlend));
+				currentBlend = std::max(0, std::min(255, (addSubtractBlend ? 1 : -1) * outputBlend + currentBlend));
 			}
 			else {
 				currentMaterial = material;
@@ -573,12 +564,12 @@ std::pair<glm::vec3, glm::vec3> VoxelGrid::InjectMaterial(
 	const glm::vec3 initialChangePos = position - extDiv2;
 
 	// DX- style coords!
-	const auto globalStart = glm::vec3(StMath::max_value(0.f, initialChangePos.x),
-		StMath::max_value(0.f, initialChangePos.z),
-		StMath::max_value(0.f, initialChangePos.y));
-	const auto globalEnd = glm::vec3(StMath::min_value(float(m_Width), globalStart.x + extents.x),
-		StMath::min_value(float(m_Height), globalStart.y + extents.z),
-		StMath::min_value(float(m_Depth), globalStart.z + extents.y));
+	const auto globalStart = glm::vec3(std::max(0.f, initialChangePos.x),
+		std::max(0.f, initialChangePos.z),
+		std::max(0.f, initialChangePos.y));
+	const auto globalEnd = glm::vec3(std::min(float(m_Width), globalStart.x + extents.x),
+		std::min(float(m_Height), globalStart.y + extents.z),
+		std::min(float(m_Depth), globalStart.z + extents.y));
 
 	return std::make_pair(globalStart, globalEnd);
 }
