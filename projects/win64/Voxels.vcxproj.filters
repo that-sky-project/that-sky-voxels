@@ -1,0 +1,86 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{20b5c1d0-9b0a-4211-a463-b7451dad3f7a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include">
+      <UniqueIdentifier>{0484ee47-4ba7-4a95-bdbe-4031070dd900}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\Voxels">
+      <UniqueIdentifier>{6e1d03dc-1563-4785-bb34-9b0b1690f3bb}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\src\Aligned.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\Logger.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\Memory.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\StdAllocatorAligned.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\StructConversions.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\TransVoxelImpl.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\VoxelGrid.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Declarations.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Grid.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Library.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Polygonizer.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Structs.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Version.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\Voxels.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\VoxelSurface.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\Voxels\MaterialMap.h">
+      <Filter>include\Voxels</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\Internal.h">
+      <Filter>src</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\Memory.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\TransVoxelImpl.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\VoxelGrid.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\Voxels.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\Transvoxel.inl">
+      <Filter>src</Filter>
+    </None>
+  </ItemGroup>
+</Project>

@@ -3,11 +3,11 @@
 // Voxels Library, please see LICENSE for licensing details.
 #pragma once
 
-void* operator new(size_t size);
-void* operator new(std::size_t count, const std::nothrow_t& tag);
-void* operator new[](std::size_t count, const std::nothrow_t& tag);
-void* operator new[](size_t size);
+void* operator new(std::size_t size);
+void* operator new(std::size_t count, const std::nothrow_t& tag) noexcept;
+void* operator new[](std::size_t count, const std::nothrow_t& tag) noexcept;
+void* operator new[](std::size_t size);
 void operator delete(void* ptr);
-void operator delete(void* ptr, const std::nothrow_t& tag);
+void operator delete(void* ptr, const std::nothrow_t& tag) noexcept;
 void operator delete[](void* ptr);
-void operator delete[](void* ptr, const std::nothrow_t& tag);
+void operator delete[](void* ptr, const std::nothrow_t& tag) noexcept;

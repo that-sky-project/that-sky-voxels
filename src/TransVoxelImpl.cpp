@@ -1,7 +1,7 @@
 // Copyright (c) 2013-2016, Stoyan Nikolov
 // All rights reserved.
 // Voxels Library, please see LICENSE for licensing details.
-#include "stdafx.h"
+#include "Internal.h"
 #include "TransVoxelImpl.h"
 #include "Transvoxel.inl"
 
@@ -14,12 +14,6 @@
 
 #include <glm/gtx/norm.hpp>
 #include <iterator>
-
-#ifndef PROFI_ENABLE
-	#ifndef _DEBUG
-		#define USE_OPENMAP
-	#endif
-#endif
 
 #define SURFACE_SHIFTING_CORRECTION 1
 
@@ -39,18 +33,6 @@ typedef union {
 	unsigned asUnsigned;
 	int asInt;
 } FloatInt;
-
-#ifdef static const char* LEVEL_STRS[] = 
-{
-	"Polygonize block Level 0",
-	"Polygonize block Level 1",
-	"Polygonize block Level 2",
-	"Polygonize block Level 3",
-	"Polygonize block Level 4",
-	"Polygonize block Level 5",
-	"Polygonize block Level 6",
-};
-#endif
 
 static const unsigned BLOCK_EXTENT = 16;
 static const unsigned BLOCK_EXTENT_POWER = 4;
@@ -851,7 +833,7 @@ private:
 		unsigned blends[8] = {0};
 		unsigned count = 0;
 		auto childMult = multiplier / 2;
-		Coord nbc; 
+		//Coord nbc; 
 		MaterialInfo childMaterial;
 		// calculate the 8 children
 		for(unsigned z = 0; z < 2; ++z)

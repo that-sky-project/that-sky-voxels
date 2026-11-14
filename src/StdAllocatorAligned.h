@@ -31,8 +31,9 @@ public :
     inline pointer address(reference r) { return &r; }
     inline const_pointer address(const_reference r) { return &r; }
 
-    inline pointer allocate(size_type cnt, typename std::allocator<void>::const_pointer = 0) 
-	{ 
+    //inline pointer allocate(size_type cnt, typename std::allocator<void>::const_pointer = 0) 
+    inline pointer allocate(size_type cnt) 
+    { 
 		return reinterpret_cast<pointer>(voxel_alloc_aligned(cnt * sizeof (T), Alignment));
     }
     inline void deallocate(pointer p, size_type) 

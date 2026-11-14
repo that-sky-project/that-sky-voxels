@@ -3,6 +3,7 @@ dist/
 .vs/
 .vscode/
 .idea/
+obj/
 
 test/
 test.*
@@ -12,3 +13,5 @@ test.*
 *.obj
 *.exe
 *.dll
+
+*.vcxproj.user
