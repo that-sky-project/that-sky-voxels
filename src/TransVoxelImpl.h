@@ -32,6 +32,7 @@ typedef std::vector<IndicesVec> TransitionIndicesVec;
 
 struct PolygonBlock : public BlockPolygons
 {
+	PolygonBlock() = default;
 	PolygonBlock(unsigned id
 				, const float3& min
 				, const float3& max);

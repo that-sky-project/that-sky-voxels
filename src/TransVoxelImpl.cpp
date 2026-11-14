@@ -21,6 +21,8 @@
 
 #include <concurrent_unordered_map.h>
 
+#include <atomic>
+
 namespace Voxels
 {
 
@@ -462,46 +464,20 @@ struct TransVoxelRun
 		
 		m_BlockCounts.resize(1);
 		m_BlockCounts[0] = m_Grid.GetBlocksCount();
-		m_MaxExtents = glm::vec3(m_Grid.GetWidth() - 1, m_Grid.GetDepth() - 1, m_Grid.GetHeight() - 1);
+
+		m_Executor.reset(new ParallelExecutor());
+		BuildFullGrid();
 
 		const unsigned levelsCount = fastlog2i((gridWidth) >> BLOCK_EXTENT_POWER) + 1;
-		
+
 		for(auto currentLevel = 0u; currentLevel < levelsCount; ++currentLevel) {
 			if(m_Result->Levels.size() <= currentLevel) {
 				m_Result->Levels.push_back(ResultType::LodLevel());
 			}
-			
-			GenerateBlockListForLevel(currentLevel);
-			
-			const int blocksCnt = int(m_LoadedBlocks.size());
-			#ifdef USE_OPENMAP
-			#pragma omp parallel for
-			#endif
-			for (int blockIt = 0; blockIt < blocksCnt; ++blockIt)
-			{
-				Block& block = m_LoadedBlocks[blockIt];
-				{
-					__declspec(thread) static auto tid = 0;
-					tid = ::GetCurrentThreadId();
-					auto cache = m_PerThreadCaches.find(tid);
-					if (cache == m_PerThreadCaches.end()) {
-						auto gridCachePtr = new GridBlocksCache(m_Grid);
-						m_PerThreadCaches.insert(std::make_pair(tid, gridCachePtr));
-						ts_BlocksCache = gridCachePtr;
-					}
-					else {
-						ts_BlocksCache = cache->second;
-					}
-				}
 
-				const bool isEmpty = block.Level == 0 && AreBlockAndNeighborsEmpty(block);
-				if (!isEmpty) {
-					PolygonizeBlock(block, *m_Result);
-					if (block.Level && (block.Level != levelsCount - 1)) {
-						GenerateTransitionCells(block);
-					}
-				}
-			}
+			GenerateBlockListForLevel(currentLevel);
+
+			PolygonizeBlockList(levelsCount);
 			m_Result->Stats.BlocksCalculated += m_LoadedBlocks.size();
 			std::for_each(m_LoadedBlocks.begin(), m_LoadedBlocks.end(), [this](const Block& block) {
 				m_Result->Stats += block.Stats;
@@ -739,9 +715,16 @@ private:
 		auto baseVec = cell.Base;
 		auto childMult = cell.LevelMultiplier >> 1;
 
-		const auto childBlockExt = BLOCK_EXTENT * childMult;
-		Coord childBlocksCnt;
-		GetBlocksCount(childMult, childBlocksCnt);
+		// All coordinates here are integral, so the block/local math is done
+		// with shifts instead of float division and modulo.
+		const unsigned shiftChild = unsigned(cell.Level - 1);
+		const unsigned shiftBlock = unsigned(cell.Level + 3);
+		const unsigned blocksX = unsigned(m_Grid.GetWidth() >> BLOCK_EXTENT_POWER) >> shiftChild;
+		const unsigned blocksY = unsigned(m_Grid.GetDepth() >> BLOCK_EXTENT_POWER) >> shiftChild;
+		const int baseX = int(baseVec.x);
+		const int baseY = int(baseVec.y);
+		const int baseZ = int(baseVec.z);
+
 		unsigned char materials[8];
 		int counters[8] = { 0 };
 		unsigned blends[8] = { 0 };
@@ -751,30 +734,28 @@ private:
 		for (unsigned y = 0; y < 2; ++y)
 		for (unsigned x = 0; x < 2; ++x)
 		{
-			const auto newBase = baseVec +
-				(UNIT_X * float(x * childMult)) + 
-				(UNIT_Y * float(y * childMult)) + 
-				(UNIT_Z * float(z * childMult));
+			const int newX = baseX + int(x) * int(childMult);
+			const int newY = baseY + int(y) * int(childMult);
+			const int newZ = baseZ + int(z) * int(childMult);
 
-			const unsigned blockId = unsigned(
-				  (unsigned(newBase.z) / childBlockExt) * childBlocksCnt.y * childBlocksCnt.x
-				+ (unsigned(newBase.y) / childBlockExt) * childBlocksCnt.x
-				+ (unsigned(newBase.x) / childBlockExt));
+			const unsigned blockId = unsigned((newZ >> shiftBlock) * blocksY * blocksX
+				+ (newY >> shiftBlock) * blocksX
+				+ (newX >> shiftBlock));
 
-			const auto localCoord = glm::vec3((unsigned)newBase.x % childBlockExt / childMult,
-				(unsigned)newBase.y % childBlockExt / childMult,
-				(unsigned)newBase.z % childBlockExt / childMult);
+			const unsigned localX = unsigned(newX >> shiftChild) & (BLOCK_EXTENT - 1);
+			const unsigned localY = unsigned(newY >> shiftChild) & (BLOCK_EXTENT - 1);
+			const unsigned localZ = unsigned(newZ >> shiftChild) & (BLOCK_EXTENT - 1);
 
-			const unsigned localId = unsigned(localCoord.z * BLOCK_EXTENT * BLOCK_EXTENT
-				+ localCoord.y * BLOCK_EXTENT
-				+ localCoord.x);
-			
+			const unsigned localId = localZ * BLOCK_EXTENT * BLOCK_EXTENT
+				+ localY * BLOCK_EXTENT
+				+ localX;
+
 			MaterialInfo childMaterial;
 			if (cell.LevelMultiplier == 2)
 			{
 				if (m_Result->Cache.Level0ConsistencyCache[blockId][localId])
 				{
-					childMaterial = GetMaterialInfo(newBase);
+					childMaterial = GetMaterialInfo(glm::vec3(float(newX), float(newY), float(newZ)));
 				}
 				else
 				{
@@ -896,6 +877,21 @@ private:
 		unsigned ReuseVertexIndices[Size];
 	};
 
+	// Reuse data of the cells of the block currently being polygonized. A
+	// generation tag makes a full clear unnecessary: entries left over from a
+	// previous block are simply ignored.
+	struct BlockFilledCell
+	{
+		unsigned Generation;
+		unsigned ReuseVertexIndices[4];
+	};
+
+	struct BlockFilledCellScratch
+	{
+		BlockFilledCell Cells[BLOCK_EXTENT * BLOCK_EXTENT * BLOCK_EXTENT];
+		unsigned Generation = 0;
+	};
+
 	struct Block
 	{
 		// TODO: The data layout of the members in this class is very unoptimal - we should probably move
@@ -913,18 +909,14 @@ private:
 			TransitionMeshNormals.resize(Cell::Face_Count);
 			TransitionMeshIndices.resize(Cell::Face_Count);
 
-			FilledCells.reserve(BLOCK_EXTENT * BLOCK_EXTENT * BLOCK_EXTENT);
 		}
-	
+
 		unsigned Id;
 		unsigned Level;
 		unsigned LevelMultiplier;
 		unsigned CoordId;
 		typedef GenericFilledCell<4> FilledCell;
 		Coord Coords;
-
-		typedef std::vector<FilledCell> FilledCellsVec;
-		FilledCellsVec FilledCells;
 
 		MaterialsInfo Materials;
 		SSEVectors Vertices;
@@ -1024,7 +1016,7 @@ private:
 		return localCoords;
 	}
 
-	Cell MakeCell(const Block& block, const Coord& localCoords)
+	Cell MakeCell(const Block& block, const Coord& localCoords, const char* valueHalo = nullptr)
 	{
 			Cell result;
 		result.Base = Coord((localCoords.x + block.Coords.x * BLOCK_EXTENT) * block.LevelMultiplier
@@ -1043,11 +1035,25 @@ private:
 			+ result.LocalBase.y * BLOCK_EXTENT
 			+ result.LocalBase.x);
 
-		if (block.Level == 0) {
+		if (valueHalo) {
+			// The halo is a (BLOCK_EXTENT+1)^3 array of the corner values, so
+			// the eight corners of every cell are plain array reads.
+			const unsigned haloExtent = BLOCK_EXTENT + 1;
+			const int localX = int(result.LocalBase.x);
+			const int localY = int(result.LocalBase.y);
+			const int localZ = int(result.LocalBase.z);
+			for (int i = 0; i < 8; ++i) {
+				const int x = localX + (i & 1);
+				const int y = localY + ((i >> 1) & 1);
+				const int z = localZ + (i >> 2);
+				result.V[i] = valueHalo[(z * haloExtent + y) * haloExtent + x];
+			}
+		}
+		else if (block.Level == 0) {
 			for (auto i = 0; i < 8; ++i) {
 				auto blockCoords = block.Coords;
-				const auto localCoords = GetLocalCornerCoords(i, result, blockCoords);
-				result.V[i] = GetGridValue(block.Level, blockCoords, localCoords);
+				const auto cornerLocalCoords = GetLocalCornerCoords(i, result, blockCoords);
+				result.V[i] = GetGridValue(block.Level, blockCoords, cornerLocalCoords);
 			}
 		}
 		else {
@@ -1058,134 +1064,291 @@ private:
 		return result;
 	}
 
+	// For reasonably sized grids we decompress the whole distance field once
+	// into a flat array. Higher LOD blocks then sample it with a plain array
+	// read instead of thrashing the per-thread block cache.
+	void BuildFullGrid()
+	{
+		const unsigned width = m_Grid.GetWidth();
+		const unsigned depth = m_Grid.GetDepth();
+		const unsigned height = m_Grid.GetHeight();
+		if (width != depth || depth != height)
+			return;
+		if ((width % BLOCK_EXTENT) != 0)
+			return;
+
+		const size_t voxelCount = size_t(width) * depth * height;
+		static const size_t MAX_FULL_GRID_VOXELS = size_t(32) * 1024 * 1024;
+		if (voxelCount > MAX_FULL_GRID_VOXELS)
+			return;
+
+		m_FullGrid.resize(voxelCount);
+
+		const unsigned blocksPerAxis = width / BLOCK_EXTENT;
+		const unsigned blockCount = blocksPerAxis * blocksPerAxis * blocksPerAxis;
+		const size_t levelWidth = size_t(width);
+
+		m_Executor->Run(blockCount, 4, [&](unsigned blockId)
+		{
+			const unsigned blockX = blockId % blocksPerAxis;
+			const unsigned blockY = (blockId / blocksPerAxis) % blocksPerAxis;
+			const unsigned blockZ = blockId / (blocksPerAxis * blocksPerAxis);
+
+			char block[BLOCK_EXTENT * BLOCK_EXTENT * BLOCK_EXTENT];
+			m_Grid.GetBlockData(glm::vec3(float(blockX), float(blockY), float(blockZ)), block);
+
+			for (unsigned z = 0; z < BLOCK_EXTENT; ++z)
+			{
+				const unsigned globalZ = blockZ * BLOCK_EXTENT + z;
+				for (unsigned y = 0; y < BLOCK_EXTENT; ++y)
+				{
+					const unsigned globalY = blockY * BLOCK_EXTENT + y;
+					const size_t rowBase = (size_t(globalZ) * depth + globalY) * levelWidth
+						+ size_t(blockX) * BLOCK_EXTENT;
+					const char* src = block + (z * BLOCK_EXTENT + y) * BLOCK_EXTENT;
+					char* dst = m_FullGrid.data() + rowBase;
+					for (unsigned x = 0; x < BLOCK_EXTENT; ++x)
+						dst[x] = src[x];
+				}
+			}
+		});
+	}
+
+	// Samples the values at all cell corners of a block once. Building it from
+	// the 8 already-decompressed blocks is much cheaper than 8 cache lookups
+	// per cell.
+	void BuildBlockValueHalo(const Block& block, char* valueHalo)
+	{
+		const unsigned haloExtent = BLOCK_EXTENT + 1;
+		const unsigned step = block.LevelMultiplier;
+
+		if (step == 1 && !m_FullGrid.empty())
+		{
+			const int width = int(m_Grid.GetWidth());
+			const int depth = int(m_Grid.GetDepth());
+			const int maxX = width - 1;
+			const int maxY = depth - 1;
+			const int maxZ = int(m_Grid.GetHeight()) - 1;
+			const int baseX = int(block.Coords.x) * BLOCK_EXTENT;
+			const int baseY = int(block.Coords.y) * BLOCK_EXTENT;
+			const int baseZ = int(block.Coords.z) * BLOCK_EXTENT;
+
+			int xs[haloExtent], ys[haloExtent], zs[haloExtent];
+			for (unsigned i = 0; i < haloExtent; ++i)
+			{
+				xs[i] = std::min(baseX + int(i), maxX);
+				ys[i] = std::min(baseY + int(i), maxY);
+				zs[i] = std::min(baseZ + int(i), maxZ);
+			}
+
+			const char* fullGrid = m_FullGrid.data();
+			for (unsigned z = 0; z < haloExtent; ++z)
+			{
+				for (unsigned y = 0; y < haloExtent; ++y)
+				{
+					const char* row = fullGrid + (std::size_t(zs[z]) * depth + ys[y]) * width;
+					for (unsigned x = 0; x < haloExtent; ++x)
+						valueHalo[(z * haloExtent + y) * haloExtent + x] = row[xs[x]];
+				}
+			}
+		}
+		else if (step == 1)
+		{
+			const int blockX = int(block.Coords.x);
+			const int blockY = int(block.Coords.y);
+			const int blockZ = int(block.Coords.z);
+			const int maxBlockX = int(m_Grid.GetWidth() / BLOCK_EXTENT) - 1;
+			const int maxBlockY = int(m_Grid.GetDepth() / BLOCK_EXTENT) - 1;
+			const int maxBlockZ = int(m_Grid.GetHeight() / BLOCK_EXTENT) - 1;
+			const int maxX = int(m_Grid.GetWidth()) - 1;
+			const int maxY = int(m_Grid.GetDepth()) - 1;
+			const int maxZ = int(m_Grid.GetHeight()) - 1;
+			const int baseX = blockX * BLOCK_EXTENT;
+			const int baseY = blockY * BLOCK_EXTENT;
+			const int baseZ = blockZ * BLOCK_EXTENT;
+
+			const char* blocks[2][2][2];
+			for (int dz = 0; dz < 2; ++dz)
+			for (int dy = 0; dy < 2; ++dy)
+			for (int dx = 0; dx < 2; ++dx)
+				blocks[dz][dy][dx] = ts_BlocksCache->GetBlockValues(0,
+					std::min(blockX + dx, maxBlockX),
+					std::min(blockY + dy, maxBlockY),
+					std::min(blockZ + dz, maxBlockZ));
+
+			for (unsigned z = 0; z < haloExtent; ++z)
+			{
+				const int globalZ = std::min(baseZ + int(z), maxZ);
+				const int blockOffsetZ = (globalZ >> BLOCK_EXTENT_POWER) - blockZ;
+				const int localZ = globalZ & (BLOCK_EXTENT - 1);
+				for (unsigned y = 0; y < haloExtent; ++y)
+				{
+					const int globalY = std::min(baseY + int(y), maxY);
+					const int blockOffsetY = (globalY >> BLOCK_EXTENT_POWER) - blockY;
+					const int localY = globalY & (BLOCK_EXTENT - 1);
+					for (unsigned x = 0; x < haloExtent; ++x)
+					{
+						const int globalX = std::min(baseX + int(x), maxX);
+						const int blockOffsetX = (globalX >> BLOCK_EXTENT_POWER) - blockX;
+						const int localX = globalX & (BLOCK_EXTENT - 1);
+						valueHalo[(z * haloExtent + y) * haloExtent + x] =
+							blocks[blockOffsetZ][blockOffsetY][blockOffsetX]
+								[(localZ * BLOCK_EXTENT + localY) * BLOCK_EXTENT + localX];
+					}
+				}
+			}
+		}
+		else
+		{
+			const glm::vec3 base = block.Coords * float(BLOCK_EXTENT * step);
+			for (unsigned z = 0; z < haloExtent; ++z)
+			for (unsigned y = 0; y < haloExtent; ++y)
+			for (unsigned x = 0; x < haloExtent; ++x)
+			{
+				valueHalo[(z * haloExtent + y) * haloExtent + x] =
+					GetGridValue(base + glm::vec3(float(x * step), float(y * step), float(z * step)));
+			}
+		}
+	}
+
 	class GridBlocksCache : public Aligned<16>
 	{
 	public:
-		GridBlocksCache(const Voxels::VoxelGrid& grid)
+		GridBlocksCache(const Voxels::VoxelGrid& grid, const char* fullGrid)
 			: m_Grid(grid)
-			, m_CacheToEvict(0)
-			, m_MaterialCacheToEvict(0)
-			, m_GridSzMinusOne(glm::vec3(m_Grid.GetWidth() - 1, m_Grid.GetHeight() - 1, m_Grid.GetDepth() - 1))
-			, m_BlockExt(glm::vec3(float(BLOCK_EXTENT)))
-			, m_BlockCoeffs(glm::vec3(1,
-										(m_Grid.GetWidth() / BLOCK_EXTENT),
-										(m_Grid.GetWidth() / BLOCK_EXTENT) * (m_Grid.GetHeight() / BLOCK_EXTENT)))
-			, m_BlockIdCoeffs(glm::vec3(1, BLOCK_EXTENT, BLOCK_EXTENT * BLOCK_EXTENT))
+			, m_FullGrid(fullGrid)
+			, m_GridDepth(grid.GetDepth())
+			, m_BlocksX(m_Grid.GetWidth() / BLOCK_EXTENT)
+			, m_BlocksZ((m_Grid.GetWidth() / BLOCK_EXTENT) * (m_Grid.GetHeight() / BLOCK_EXTENT))
+			, m_MaxX(int(m_Grid.GetWidth()) - 1)
+			, m_MaxY(int(m_Grid.GetDepth()) - 1)
+			, m_MaxZ(int(m_Grid.GetHeight()) - 1)
 		{
 			Reset();
 		}
 
 		void Reset()
 		{
-			std::fill(m_CachedBlocks, m_CachedBlocks + BLOCKS_CACHE_SIZE, std::make_pair(FREE_BLOCK, FREE_BLOCK));
-			std::fill(m_MaterialCachedBlocks, m_MaterialCachedBlocks + BLOCKS_CACHE_SIZE, FREE_BLOCK);
+			for (auto& entry : m_CachedBlocks)
+				entry = std::make_pair(FREE_BLOCK, FREE_BLOCK);
+			for (auto& entry : m_MaterialCachedBlocks)
+				entry = FREE_BLOCK;
 		}
 
 		char GetGridValue(unsigned blockLevel,
 			const glm::vec3& blockCoordsf3,
 			const glm::vec3& localCoords) const
 		{
-			const auto blockId = unsigned(glm::dot(blockCoordsf3, m_BlockCoeffs));
-			const char* blockFound = nullptr;
-			for (int i = 0u; i < BLOCKS_CACHE_SIZE; ++i)
-			{
-				if (blockLevel == m_CachedBlocks[i].first && blockId == m_CachedBlocks[i].second)
-				{
-					blockFound = m_Cache[i];
-					break;
-				}
-			}
-			if (!blockFound)
-			{
-				m_Grid.GetBlockData(blockCoordsf3, m_Cache[m_CacheToEvict]);
-				m_CachedBlocks[m_CacheToEvict].first = blockLevel;
-				m_CachedBlocks[m_CacheToEvict].second = blockId;
-				blockFound = m_Cache[m_CacheToEvict];
-
-				m_CacheToEvict = (m_CacheToEvict + 1) % BLOCKS_CACHE_SIZE;
-			}
-
-			const unsigned pointId = unsigned(glm::dot(glm::mod(localCoords, m_BlockExt), m_BlockIdCoeffs));
-			return blockFound[pointId];
+			return GetBlockValue(blockLevel,
+				int(blockCoordsf3.x), int(blockCoordsf3.y), int(blockCoordsf3.z),
+				int(localCoords.x), int(localCoords.y), int(localCoords.z));
 		}
 
 		char GetGridValue(const glm::vec3& coordinates) const
 		{
-			const unsigned blockLevel = 0;
-			glm::vec3 clamped;
-			glm::vec3 blockCoordsf3;
-
-			CalculateNeededCoords(coordinates,
-				clamped,
-				blockCoordsf3);
-			
-			return GetGridValue(blockLevel, blockCoordsf3, clamped);
+			int x, y, z;
+			ClampCoords(coordinates, x, y, z);
+			if (m_FullGrid)
+				return m_FullGrid[(size_t(z) * m_GridDepth + size_t(y)) * size_t(m_MaxX + 1) + size_t(x)];
+			return GetBlockValue(0,
+				x >> BLOCK_EXTENT_POWER, y >> BLOCK_EXTENT_POWER, z >> BLOCK_EXTENT_POWER,
+				x & (BLOCK_EXTENT - 1), y & (BLOCK_EXTENT - 1), z & (BLOCK_EXTENT - 1));
 		}
 
 		MaterialInfo GetMaterialGridValue(const glm::vec3& coordinates) const
 		{
-			glm::vec3 clamped;
-			glm::vec3 blockCoordsf3;
+			int x, y, z;
+			ClampCoords(coordinates, x, y, z);
 
-			CalculateNeededCoords(coordinates,
-				clamped,
-				blockCoordsf3);
+			const int blockX = x >> BLOCK_EXTENT_POWER;
+			const int blockY = y >> BLOCK_EXTENT_POWER;
+			const int blockZ = z >> BLOCK_EXTENT_POWER;
+			const unsigned slot = SlotFor(blockX, blockY, blockZ);
+			const unsigned blockId = BlockId(blockX, blockY, blockZ);
 
-			const auto blockId = unsigned(glm::dot(blockCoordsf3, m_BlockCoeffs));
-
-			const unsigned char* materialBlockFound = nullptr;
-			const unsigned char* blendBlockFound = nullptr;
-			for (int i = 0u; i < BLOCKS_CACHE_SIZE; ++i)
+			if (m_MaterialCachedBlocks[slot] != blockId)
 			{
-				if (blockId == m_MaterialCachedBlocks[i])
-				{
-					materialBlockFound = m_MaterialCache[i];
-					blendBlockFound = m_BlendCache[i];
-					break;
-				}
-			}
-			if (!materialBlockFound)
-			{
-				const auto vec3coords = glm::vec3(blockCoordsf3.x, blockCoordsf3.y, blockCoordsf3.z);
-				m_Grid.GetMaterialBlockData(vec3coords,
-					(unsigned char*)(m_MaterialCache[m_MaterialCacheToEvict]),
-					(unsigned char*)(m_BlendCache[m_MaterialCacheToEvict]));
-				m_MaterialCachedBlocks[m_MaterialCacheToEvict] = blockId;
-				materialBlockFound = m_MaterialCache[m_MaterialCacheToEvict];
-				blendBlockFound = m_BlendCache[m_MaterialCacheToEvict];
-
-				m_MaterialCacheToEvict = (m_MaterialCacheToEvict + 1) % BLOCKS_CACHE_SIZE;
+				m_Grid.GetMaterialBlockData(glm::vec3(float(blockX), float(blockY), float(blockZ)),
+					m_MaterialCache[slot],
+					m_BlendCache[slot]);
+				m_MaterialCachedBlocks[slot] = blockId;
 			}
 
-			const unsigned pointId = unsigned(glm::dot(glm::mod(clamped, m_BlockExt), m_BlockIdCoeffs));
-			return MaterialInfo(materialBlockFound[pointId], blendBlockFound[pointId]);
+			const unsigned pointId = VoxelId(x & (BLOCK_EXTENT - 1), y & (BLOCK_EXTENT - 1), z & (BLOCK_EXTENT - 1));
+			return MaterialInfo(m_MaterialCache[slot][pointId], m_BlendCache[slot][pointId]);
+		}
+
+	public:
+		const char* GetBlockValues(unsigned level, int blockX, int blockY, int blockZ) const
+		{
+			return GetBlockDataPtr(level, blockX, blockY, blockZ);
 		}
 
 	private:
-		void CalculateNeededCoords(const glm::vec3& coordinates,
-			glm::vec3& clamped,
-			glm::vec3& blockCoordsf3) const
+		// Blocks are keyed by their coordinates modulo 4 on each axis. Any
+		// region up to 4 blocks wide maps to distinct slots, which is what the
+		// halo construction and the normal sampling need.
+		static unsigned SlotFor(int blockX, int blockY, int blockZ)
 		{
-			clamped = glm::clamp(coordinates, glm::vec3(0.f), m_GridSzMinusOne);
+			return unsigned((blockX & 3) | ((blockY & 3) << 2) | ((blockZ & 3) << 4));
+		}
 
-			blockCoordsf3 = glm::floor(clamped / m_BlockExt);
+		static unsigned VoxelId(int x, int y, int z)
+		{
+			return unsigned(x | (y << BLOCK_EXTENT_POWER) | (z << (BLOCK_EXTENT_POWER * 2)));
+		}
+
+		unsigned BlockId(int blockX, int blockY, int blockZ) const
+		{
+			return unsigned(blockX) + unsigned(blockY) * m_BlocksX + unsigned(blockZ) * m_BlocksZ;
+		}
+
+		void ClampCoords(const glm::vec3& coordinates, int& x, int& y, int& z) const
+		{
+			x = std::min(std::max(int(coordinates.x), 0), m_MaxX);
+			y = std::min(std::max(int(coordinates.y), 0), m_MaxY);
+			z = std::min(std::max(int(coordinates.z), 0), m_MaxZ);
+		}
+
+		char GetBlockValue(unsigned level, int blockX, int blockY, int blockZ,
+			int localX, int localY, int localZ) const
+		{
+			return GetBlockDataPtr(level, blockX, blockY, blockZ)[VoxelId(localX, localY, localZ)];
+		}
+
+		// Returns the decompressed 16^3 values of a block. The returned pointer
+		// stays valid as long as the same thread does not request more than 8
+		// blocks with distinct coordinate parities (the cache is direct-mapped).
+		const char* GetBlockDataPtr(unsigned level, int blockX, int blockY, int blockZ) const
+		{
+			const unsigned slot = SlotFor(blockX, blockY, blockZ);
+			const unsigned blockId = BlockId(blockX, blockY, blockZ);
+			if (m_CachedBlocks[slot].first != level || m_CachedBlocks[slot].second != blockId)
+			{
+				m_Grid.GetBlockData(glm::vec3(float(blockX), float(blockY), float(blockZ)),
+					m_Cache[slot]);
+				m_CachedBlocks[slot].first = level;
+				m_CachedBlocks[slot].second = blockId;
+			}
+			return m_Cache[slot];
 		}
 
 		const Voxels::VoxelGrid& m_Grid;
-		static const unsigned BLOCKS_CACHE_SIZE = 8u;
+		const char* m_FullGrid;
+		unsigned m_GridDepth;
+		static const unsigned BLOCKS_CACHE_SIZE = 64u;
 		static const unsigned FREE_BLOCK = 0xFFFFFFFF;
 
-		glm::vec3 m_GridSzMinusOne;
-		glm::vec3 m_BlockExt;
-		glm::vec3 m_BlockIdCoeffs;
-		glm::vec3 m_BlockCoeffs;
+		unsigned m_BlocksX;
+		unsigned m_BlocksZ;
+		int m_MaxX;
+		int m_MaxY;
+		int m_MaxZ;
 
 		mutable std::pair<unsigned, unsigned> m_CachedBlocks[BLOCKS_CACHE_SIZE];
-		mutable char m_CacheToEvict;
 		mutable char m_Cache[BLOCKS_CACHE_SIZE][BLOCK_EXTENT*BLOCK_EXTENT*BLOCK_EXTENT];
 
 		mutable unsigned m_MaterialCachedBlocks[BLOCKS_CACHE_SIZE];
-		mutable char m_MaterialCacheToEvict;
 		mutable unsigned char m_MaterialCache[BLOCKS_CACHE_SIZE][BLOCK_EXTENT*BLOCK_EXTENT*BLOCK_EXTENT];
 		mutable unsigned char m_BlendCache[BLOCKS_CACHE_SIZE][BLOCK_EXTENT*BLOCK_EXTENT*BLOCK_EXTENT];
 	};
@@ -1209,10 +1372,9 @@ private:
 
 	glm::vec3 CalcNormal(const glm::vec3& coord) const
 	{
-		const glm::vec3 minVec(0.f);
-		auto normal = glm::vec3(  (GetGridValue(glm::clamp(coord + UNIT_X, minVec, m_MaxExtents)) - GetGridValue(glm::clamp(coord - UNIT_X, minVec, m_MaxExtents))) * 0.5f,
-								  (GetGridValue(glm::clamp(coord + UNIT_Z, minVec, m_MaxExtents)) - GetGridValue(glm::clamp(coord - UNIT_Z, minVec, m_MaxExtents))) * 0.5f,
-								  (GetGridValue(glm::clamp(coord + UNIT_Y, minVec, m_MaxExtents)) - GetGridValue(glm::clamp(coord - UNIT_Y, minVec, m_MaxExtents))) * 0.5f);
+		auto normal = glm::vec3(  (GetGridValue(coord + UNIT_X) - GetGridValue(coord - UNIT_X)) * 0.5f,
+								  (GetGridValue(coord + UNIT_Z) - GetGridValue(coord - UNIT_Z)) * 0.5f,
+								  (GetGridValue(coord + UNIT_Y) - GetGridValue(coord - UNIT_Y)) * 0.5f);
 		return normalizeFixZero(normal);
 	}
 
@@ -1240,16 +1402,40 @@ private:
 		const float transitionNormFactor = 1 / 256.f;
 
 		const auto totalSize = m_LoadedBlocks.size();
-				
-		for(auto id = 0u; id < totalSize; ++id) {
+		if (!totalSize)
+			return;
+
+		auto& outputBlocks = m_Result->Levels[m_LoadedBlocks[0].Level].Blocks;
+		const auto outputBase = outputBlocks.size();
+
+		// Reserve the output slots up front so the blocks can be converted in
+		// parallel and written directly into their final place.
+		unsigned nonEmptyCount = 0;
+		for (const auto& loadedBlock : m_LoadedBlocks)
+			nonEmptyCount += loadedBlock.Vertices.empty() ? 0u : 1u;
+
+		const unsigned invalidSlot = std::numeric_limits<unsigned>::max();
+		std::vector<unsigned> outputSlot(totalSize, invalidSlot);
+		unsigned nextSlot = 0;
+		for (auto id = 0u; id < totalSize; ++id)
+		{
+			if (!m_LoadedBlocks[id].Vertices.empty())
+				outputSlot[id] = nextSlot++;
+		}
+
+		outputBlocks.resize(outputBase + nonEmptyCount);
+
+		std::atomic<unsigned> degenerateTriangles(0);
+		std::vector<unsigned> failedMaterials(totalSize, invalidSlot);
+
+		m_Executor->Run(unsigned(totalSize), 8, [&](unsigned id)
+		{
 			auto& loadedBlock = m_LoadedBlocks[id];
 			auto& indices = loadedBlock.Indices;
 			auto& vertices = loadedBlock.Vertices;
-			if(!vertices.size())
-				continue;
+			if(vertices.empty())
+				return;
 
-			auto& outputBlocks = m_Result->Levels[loadedBlock.Level].Blocks;
-	
 			unsigned levelMultiplier = loadedBlock.LevelMultiplier;
 			glm::vec3 coords = loadedBlock.Coords;
 			coords *= levelMultiplier * BLOCK_EXTENT;
@@ -1260,13 +1446,15 @@ private:
 			std::swap(minCorner.y, minCorner.z);
 			std::swap(maxCorner.y, maxCorner.z);
 
-			outputBlocks.push_back(PolygonBlock(loadedBlock.Id, minCorner, maxCorner));
-			
+			auto& outputBlock = outputBlocks[outputBase + outputSlot[id]];
+			outputBlock = PolygonBlock(loadedBlock.Id, minCorner, maxCorner);
+
 			const auto indSz = indices.size();
 			const auto eps = std::numeric_limits<float>::epsilon();
-			auto& outputIndices = outputBlocks.back().Indices;
+			auto& outputIndices = outputBlock.Indices;
 			outputIndices.reserve(indSz);
 
+			unsigned degenerate = 0;
 			for(auto i = 0u; i < indSz; i += 3)
 			{
 				const auto& v0 = vertices[indices[i]];
@@ -1286,11 +1474,12 @@ private:
 				}
 				else
 				{
-					++(m_Result->Stats.DegenerateTrianglesRemoved);
+					++degenerate;
 				}
 			}
+			if (degenerate)
+				degenerateTriangles.fetch_add(degenerate, std::memory_order_relaxed);
 
-			auto& outputBlock = m_Result->Levels[loadedBlock.Level].Blocks.back();
 			auto& secondaryVertices = loadedBlock.SecondaryVertices;
 			auto& resultVertices = outputBlock.Vertices;
 			auto& normals = loadedBlock.Normals;
@@ -1301,7 +1490,7 @@ private:
 			{
 				auto& fv = vertices[i];
 				resultVertices.push_back(PolygonVertex());
-				auto& finalVertex = resultVertices.back(); 
+				auto& finalVertex = resultVertices.back();
 
 				finalVertex.Position = tofloat3(glm::vec3(fv) * normFactor);
 				// swap z & y so that the returned polygon surface matches the popular DX notation
@@ -1315,7 +1504,7 @@ private:
 				finalVertex.Normal = tofloat3(normals[i]);
 
 				auto& secondaryFv = secondaryVertices[i];
-				// NB: We swap the last three bits with the three prior to them to 
+				// NB: We swap the last three bits with the three prior to them to
 				// match the output transition faces enum
 				FloatInt transitionFlags;
 				transitionFlags.asFloat = secondaryFv.w;
@@ -1324,7 +1513,7 @@ private:
 					transitionFlags.asUnsigned >>= 3;
 					transitionFlags.asUnsigned |= (temp3bits << 3);
 				}
-				
+
 				finalVertex.SecondaryPosition = tofloat4(secondaryFv * normFactor);
 				finalVertex.SecondaryPosition.w = transitionFlags.asFloat;
 				std::swap(finalVertex.SecondaryPosition.y, finalVertex.SecondaryPosition.z);
@@ -1332,9 +1521,7 @@ private:
 				//define the textures
 				const auto matId = materials[i].Id;
 				if(!FillTextureIdsForVertex(matId, materials[i].Blend, finalVertex)) {
-					char buffer[VOXELS_LOG_SIZE];
-					snprintf(buffer, VOXELS_LOG_SIZE, "Unable to assign textures on vertex with material id %u", matId);
-					VOXLOG(LS_Error, buffer);
+					failedMaterials[id] = matId;
 				}
 			}
 
@@ -1386,13 +1573,25 @@ private:
 					//define the textures
 					const auto matId = transMaterials[i].Id;
 					if(!FillTextureIdsForVertex(matId, transMaterials[i].Blend, finalVertex)) {
-						char buffer[VOXELS_LOG_SIZE];
-						snprintf(buffer, VOXELS_LOG_SIZE, "Unable to assign textures on vertex with material id %u", matId);
-						VOXLOG(LS_Error, buffer);
+						failedMaterials[id] = matId;
 					}
 				}
 
 				std::copy(transIndices.cbegin(), transIndices.cend(), std::back_inserter(outputTransIndices));
+			}
+		});
+
+		m_Result->Stats.DegenerateTrianglesRemoved += degenerateTriangles.load(std::memory_order_relaxed);
+
+		// The logger is user supplied and not necessarily thread safe, so the
+		// (very rare) texture assignment failures are reported here.
+		for (auto id = 0u; id < totalSize; ++id)
+		{
+			if (failedMaterials[id] != invalidSlot)
+			{
+				char buffer[VOXELS_LOG_SIZE];
+				snprintf(buffer, VOXELS_LOG_SIZE, "Unable to assign textures on vertex with material id %u", failedMaterials[id]);
+				VOXLOG(LS_Error, buffer);
 			}
 		}
 	}
@@ -1417,11 +1616,11 @@ private:
 		return result;
 	}
 
-	unsigned GenerateVertexFromPoint(Block& block, const Cell& cell, char v) {
+	unsigned GenerateVertexFromPoint(Block& block, const Cell& cell, char v,
+		const glm::vec3& normal, const MaterialInfo& myMaterial) {
 		auto V = cell.GetCornerCoords(v);
-		block.Normals.push_back(CalcNormal(V));
-		
-		auto myMaterial = GetMaterialInfo(V);
+		block.Normals.push_back(normal);
+
 		if(cell.Material.Id != myMaterial.Id) {
 			block.Materials.push_back(cell.Material);
 		} else {
@@ -1452,6 +1651,7 @@ private:
 	}
 
 	void FindBestVertexInLODChain(int level, glm::vec3& P0, glm::vec3& P1) const {
+		char p0Value = GetGridValue(P0);
 		for(int lev = level; lev > 0; --lev) {
 			const auto midpoint = P0 + (P1 - P0) / 2.f;
 
@@ -1463,13 +1663,12 @@ private:
 			#endif
 
 			const auto midValue = GetGridValue(midpoint);
-			const auto p0Value = GetGridValue(P0);
-			const auto p1Value = GetGridValue(P1);
 
 			if((p0Value * midValue) <= 0) {
 				P1 = midpoint;
 			} else {
 				P0 = midpoint;
+				p0Value = midValue;
 			}
 
 			#ifdef _DEBUG
@@ -1492,14 +1691,72 @@ private:
 			if (!m_Grid.IsBlockEmpty(coord))
 				return false;
 		}
-		
+
 		return true;
 	}
 
+	// Binds the calling thread's grid-block cache. Must be called once per
+	// thread before it reads voxel data.
+	void EnsureThreadCache()
+	{
+		const int tid = int(::GetCurrentThreadId());
+		auto cache = m_PerThreadCaches.find(tid);
+		if (cache == m_PerThreadCaches.end()) {
+			auto gridCachePtr = new GridBlocksCache(m_Grid, m_FullGrid.empty() ? nullptr : m_FullGrid.data());
+			m_PerThreadCaches.insert(std::make_pair(tid, gridCachePtr));
+			ts_BlocksCache = gridCachePtr;
+		}
+		else {
+			ts_BlocksCache = cache->second;
+		}
+	}
+
+	void ProcessBlock(unsigned blockIndex, unsigned levelsCount)
+	{
+		Block& block = m_LoadedBlocks[blockIndex];
+		const bool isEmpty = block.Level == 0 && AreBlockAndNeighborsEmpty(block);
+		if (!isEmpty) {
+			PolygonizeBlock(block, *m_Result);
+			if (block.Level && (block.Level != levelsCount - 1)) {
+				GenerateTransitionCells(block);
+			}
+		}
+	}
+
+	// Blocks are independent (each owns its output data and writes only its own
+	// entries in the material caches), so the list is processed by all cores.
+	void PolygonizeBlockList(unsigned levelsCount)
+	{
+		const unsigned blocksCnt = unsigned(m_LoadedBlocks.size());
+		m_Executor->Run(blocksCnt, 4, [this, levelsCount](unsigned blockIndex)
+		{
+			EnsureThreadCache();
+			ProcessBlock(blockIndex, levelsCount);
+		});
+	}
+
 	void PolygonizeBlock(Block& block, PolygonMap& outputMap)
-	{			
+	{
 		unsigned verticesIndices[15];
-		
+
+		char valueHalo[(BLOCK_EXTENT + 1) * (BLOCK_EXTENT + 1) * (BLOCK_EXTENT + 1)];
+		BuildBlockValueHalo(block, valueHalo);
+
+		// Per-thread reuse scratch, reused by every block of this thread.
+		static thread_local std::unique_ptr<BlockFilledCellScratch> reuseScratch;
+		if (!reuseScratch) {
+			reuseScratch.reset(new BlockFilledCellScratch());
+			for (auto& cell : reuseScratch->Cells)
+				cell.Generation = 0;
+		}
+		unsigned reuseGeneration = ++reuseScratch->Generation;
+		if (reuseGeneration == 0) {
+			for (auto& cell : reuseScratch->Cells)
+				cell.Generation = 0;
+			reuseGeneration = ++reuseScratch->Generation;
+		}
+		BlockFilledCell* filledCells = reuseScratch->Cells;
+
 		assert(BLOCK_EXTENT == BLOCK_EXTENT && BLOCK_EXTENT == BLOCK_EXTENT);
 		const auto blockBase = block.Coords * float(BLOCK_EXTENT);
 
@@ -1508,18 +1765,14 @@ private:
 		{
 			// clear the y-bit
 			reuseValidityMask &= 0xD;
-			for(unsigned cellY = 0; cellY < BLOCK_EXTENT; ++cellY)	
+			for(unsigned cellY = 0; cellY < BLOCK_EXTENT; ++cellY)
 			{
 				// clear the x-bit
 				reuseValidityMask &= 0xE;
 				for(unsigned cellX = 0; cellX < BLOCK_EXTENT; ++cellX)
 				{
 					Coord cellCoords(cellX, cellY, cellZ);
-					Cell cell = MakeCell(block, cellCoords);
-					
-					block.FilledCells.push_back(Block::FilledCell());
-
-					auto& thisCellReuseData = block.FilledCells.back();
+					Cell cell = MakeCell(block, cellCoords, valueHalo);
 
 					//classify the cell
 					const unsigned long caseCode = Cell::CalcCaseCode(cell.V);
@@ -1530,11 +1783,20 @@ private:
 						++block.Stats.TrivialCells;
 						continue;
 					}
-					
+
+					const unsigned cellId = cellZ * BLOCK_EXTENT * BLOCK_EXTENT
+						+ cellY * BLOCK_EXTENT + cellX;
+					BlockFilledCell& thisCellReuseData = filledCells[cellId];
+					thisCellReuseData.Generation = reuseGeneration;
+					thisCellReuseData.ReuseVertexIndices[0] = INVALID_INDEX;
+					thisCellReuseData.ReuseVertexIndices[1] = INVALID_INDEX;
+					thisCellReuseData.ReuseVertexIndices[2] = INVALID_INDEX;
+					thisCellReuseData.ReuseVertexIndices[3] = INVALID_INDEX;
+
 					#ifdef USE_MATERIAL_CACHE
 					CalculateMaterialForCellCache(cell);
 					#endif
-					
+
 					++block.Stats.NonTrivialCells;
 					
 					const unsigned caseIndex = regularCellClass[caseCode];
@@ -1542,6 +1804,21 @@ private:
 
 					const RegularCellData regCellData = regularCellData[caseIndex];
 					const unsigned short* regVertexData = regularVertexData[caseCode];
+
+					// Normals and materials of the eight cell corners are
+					// shared by all edges of the cell, so compute each once.
+					glm::vec3 cornerNormals[8];
+					MaterialInfo cornerMaterials[8];
+					unsigned computedCorners = 0;
+					auto ensureCorner = [&](int corner)
+					{
+						if (computedCorners & (1u << corner))
+							return;
+						const auto cornerCoord = cell.GetCornerCoords(corner);
+						cornerNormals[corner] = CalcNormal(cornerCoord);
+						cornerMaterials[corner] = GetMaterialInfo(cornerCoord);
+						computedCorners |= 1u << corner;
+					};
 
 					for (long vertexIndex = 0, vertexCount = regCellData.GetVertexCount(); vertexIndex < vertexCount; ++vertexIndex)
 					{
@@ -1579,9 +1856,11 @@ private:
 						{
 							Coord reuseCoord = FindAdjCellForReuse(direction, cellCoords);
 
-							const auto& filledCell = block.FilledCells[MakeReuseId(reuseCoord)];
+							const auto& filledCell = filledCells[MakeReuseId(reuseCoord)];
 
-							auto reuseIndex = filledCell.ReuseVertexIndices[vIndexInCell];
+							auto reuseIndex = filledCell.Generation == reuseGeneration
+								? filledCell.ReuseVertexIndices[vIndexInCell]
+								: INVALID_INDEX;
 
 							bool sameMaterial = true;
 							// check the material
@@ -1601,7 +1880,9 @@ private:
 								{
 									if(verticesIndices[vertexIndex] == INVALID_INDEX)
 									{
-										auto index = GenerateVertexFromPoint(block, cell, v0);
+										ensureCorner(v0);
+										auto index = GenerateVertexFromPoint(block, cell, v0,
+											cornerNormals[v0], cornerMaterials[v0]);
 										verticesIndices[vertexIndex] = index;
 									}
 								}
@@ -1616,7 +1897,10 @@ private:
 							// Vertex lies on one of the endpoints - create the new vertex there
 							if((t & 0x00FF) == 0)
 							{
-								auto index = GenerateVertexFromPoint(block, cell, (t == 0) ? v1 : v0);
+								const char cornerId = (t == 0) ? v1 : v0;
+								ensureCorner(cornerId);
+								auto index = GenerateVertexFromPoint(block, cell, cornerId,
+									cornerNormals[cornerId], cornerMaterials[cornerId]);
 								if(t == 0 && v1 == 7)
 									thisCellReuseData.ReuseVertexIndices[vIndexInCell] = index;
 								// Save this index for the triangulation
@@ -1649,10 +1933,20 @@ private:
 									P1 = cell.GetCornerCoords(v1);
 								}
 
-								N0 = CalcNormal(P0);
-								N1 = CalcNormal(P1);
-								M0 = GetMaterialInfo(P0);
-								M1 = GetMaterialInfo(P1);
+								if(block.Level == 0) {
+									ensureCorner(v0);
+									ensureCorner(v1);
+									N0 = cornerNormals[v0];
+									N1 = cornerNormals[v1];
+									M0 = cornerMaterials[v0];
+									M1 = cornerMaterials[v1];
+								}
+								else {
+									N0 = CalcNormal(P0);
+									N1 = CalcNormal(P1);
+									M0 = GetMaterialInfo(P0);
+									M1 = GetMaterialInfo(P1);
+								}
 
 								const long u = 0x0100 - t;
 								glm::vec4 Q = glm::vec4((float)t * P0 + (float)u * P1, 0.f);
@@ -1683,7 +1977,7 @@ private:
 							}
 						}
 					}
-					
+
 					block.SecondaryVertices.resize(block.Vertices.size());
 					// push all triangles
 					for (auto v = 0L, triagCount = regCellData.GetTriangleCount() * 3; v < triagCount; v += 3)
@@ -2096,8 +2390,8 @@ private:
 	}
 	
 	const Voxels::VoxelGrid& m_Grid;
-
-	glm::vec3 m_MaxExtents;
+	std::vector<char> m_FullGrid;
+	std::unique_ptr<ParallelExecutor> m_Executor;
 	std::vector<glm::vec3> m_BlockCounts;
 
 	const MaterialMap* m_Materials;

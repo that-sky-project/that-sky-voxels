@@ -12,6 +12,27 @@
 namespace Voxels
 {
 
+namespace
+{
+	// Reused by each worker thread while the grid is being voxelized.
+	struct BlockScratch
+	{
+		static const unsigned VoxelCount = VoxelGrid::BLOCK_EXTENTS * VoxelGrid::BLOCK_EXTENTS * VoxelGrid::BLOCK_EXTENTS;
+
+		BlockScratch()
+			: Distance(VoxelCount)
+			, Material(VoxelCount)
+			, Blend(VoxelCount)
+			, Values(new float[VoxelCount])
+		{}
+
+		std::vector<char> Distance;
+		std::vector<unsigned char> Material;
+		std::vector<unsigned char> Blend;
+		std::unique_ptr<float[]> Values;
+	};
+}
+
 struct PackedGridImpl : public Grid::PackedGrid
 {
 	virtual void Destroy() override
@@ -86,44 +107,59 @@ VoxelGrid::VoxelGrid(unsigned w, unsigned d, unsigned h,
 	// Create per-block data
 	auto blocksX = m_Width / BLOCK_EXTENTS;
 	auto blocksY = m_Depth / BLOCK_EXTENTS;
-	auto blocksZ = m_Height / BLOCK_EXTENTS;
+	const unsigned totalBlocks = blocksX * blocksY * blocksY;
 
 	const auto valuesCnt = BLOCK_EXTENTS*BLOCK_EXTENTS*BLOCK_EXTENTS;
-	std::vector<char> blockData(valuesCnt);
-	std::vector<unsigned char> materialData(valuesCnt);
-	materialData.resize(valuesCnt);
-	std::vector<unsigned char> blendData(valuesCnt);
-	blendData.resize(valuesCnt);
+	m_Blocks.resize(totalBlocks);
 
-	unsigned blockId = 0;
-	std::unique_ptr<float[]> surfaceValues(new float[valuesCnt]);
-	for (unsigned blZ = 0u; blZ < blocksY; ++blZ)
-	for (unsigned blY = 0u; blY < blocksY; ++blY)
-	for (unsigned blX = 0u; blX < blocksX; ++blX)
+	ParallelExecutor executor;
+	executor.Run(totalBlocks, 4, [&](unsigned blockId)
 	{
-		blockData.clear();
+		static thread_local BlockScratch scratch;
+
+		const unsigned blX = blockId % blocksX;
+		const unsigned blY = (blockId / blocksX) % blocksY;
+		const unsigned blZ = blockId / (blocksX * blocksY);
 
 		const float xStartSurf = startX + blX * BLOCK_EXTENTS * step;
-		const float xEndSurf = xStartSurf + BLOCK_EXTENTS* step;
+		const float xEndSurf = xStartSurf + BLOCK_EXTENTS * step;
 		const float yStartSurf = startY + blY * BLOCK_EXTENTS * step;
-		const float yEndSurf = yStartSurf + BLOCK_EXTENTS* step;
+		const float yEndSurf = yStartSurf + BLOCK_EXTENTS * step;
 		const float zStartSurf = startZ + blZ * BLOCK_EXTENTS * step;
-		const float zEndSurf = zStartSurf + BLOCK_EXTENTS* step;
+		const float zEndSurf = zStartSurf + BLOCK_EXTENTS * step;
 
 		surface->GetSurface(xStartSurf, xEndSurf, step,
 			yStartSurf, yEndSurf, step,
 			zStartSurf, zEndSurf, step,
-			surfaceValues.get(),
-			&materialData[0],
-			&blendData[0]);
+			scratch.Values.get(),
+			scratch.Material.data(),
+			scratch.Blend.data());
 
-		for (auto id = 0; id < BLOCK_EXTENTS*BLOCK_EXTENTS*BLOCK_EXTENTS; ++id)
+		for (auto id = 0u; id < valuesCnt; ++id)
 		{
-			blockData.push_back(toGridDistValue(round(surfaceValues[id])));
+			scratch.Distance[id] = toGridDistValue(round(scratch.Values[id]));
 		}
-		
-		PushBlock(blockId, blockData, materialData, blendData);
-	}
+
+		Block& block = m_Blocks[blockId];
+		block.InternalId = blockId;
+		block.Flags = BF_None;
+
+		bool isEmpty = false;
+		if (!CompressBlock<char>(scratch.Distance.data(), block.DistanceData, &isEmpty)) {
+			SETFLAG(block.Flags, BF_DistanceUncompressed);
+		}
+		if (isEmpty) {
+			SETFLAG(block.Flags, BF_Empty);
+		}
+
+		if (!CompressBlock<unsigned char>(scratch.Material.data(), block.MaterialData)) {
+			SETFLAG(block.Flags, BF_MaterialUncompressed);
+		}
+
+		if (!CompressBlock<unsigned char>(scratch.Blend.data(), block.BlendData)) {
+			SETFLAG(block.Flags, BF_BlendUncompressed);
+		}
+	});
 
 	RecalculateMemoryUsage();
 }
@@ -161,22 +197,19 @@ VoxelGrid::VoxelGrid(unsigned w, const char* heightmap)
 		// Create per-block data
 	auto blocksX = m_Width / BLOCK_EXTENTS;
 	auto blocksY = m_Depth / BLOCK_EXTENTS;
-	auto blocksZ = m_Height / BLOCK_EXTENTS;
+	const unsigned totalBlocks = blocksX * blocksY * blocksY;
 
-	std::vector<char> blockData;
-	std::vector<unsigned char> materialData;
-	std::vector<unsigned char> blendData;
+	m_Blocks.resize(totalBlocks);
 
-	unsigned blockId = 0;
-
-	for (unsigned blZ = 0u; blZ < blocksY; ++blZ)
-	for (unsigned blY = 0u; blY < blocksY; ++blY)
-	for (unsigned blX = 0u; blX < blocksX; ++blX)
+	ParallelExecutor executor;
+	executor.Run(totalBlocks, 4, [&](unsigned blockId)
 	{
-		blockData.clear();
-		materialData.clear();
-		blendData.clear();
-		
+		static thread_local BlockScratch scratch;
+
+		const unsigned blX = blockId % blocksX;
+		const unsigned blY = (blockId / blocksX) % blocksY;
+		const unsigned blZ = blockId / (blocksX * blocksY);
+
 		const auto blockSlice = blZ * BLOCK_EXTENTS;
 		const auto blockColumn = blX * BLOCK_EXTENTS;
 		const auto blockRow = blY * BLOCK_EXTENTS;
@@ -193,16 +226,32 @@ VoxelGrid::VoxelGrid(unsigned w, const char* heightmap)
 
 					char height = (char)std::clamp<int>((int)slice - (int)heightmap[row * w + column], -127, 127);
 
-					blockData.push_back(toGridDistValue(height));
-
-					materialData.push_back(0);
-					blendData.push_back(0);
+					const unsigned id = z * BLOCK_EXTENTS * BLOCK_EXTENTS + y * BLOCK_EXTENTS + x;
+					scratch.Distance[id] = toGridDistValue(height);
 				}
 			}
 		}
 
-		PushBlock(blockId, blockData, materialData, blendData);
-	}
+		Block& block = m_Blocks[blockId];
+		block.InternalId = blockId;
+		block.Flags = BF_None;
+
+		bool isEmpty = false;
+		if (!CompressBlock<char>(scratch.Distance.data(), block.DistanceData, &isEmpty)) {
+			SETFLAG(block.Flags, BF_DistanceUncompressed);
+		}
+		if (isEmpty) {
+			SETFLAG(block.Flags, BF_Empty);
+		}
+
+		if (!CompressBlock<unsigned char>(scratch.Material.data(), block.MaterialData)) {
+			SETFLAG(block.Flags, BF_MaterialUncompressed);
+		}
+
+		if (!CompressBlock<unsigned char>(scratch.Blend.data(), block.BlendData)) {
+			SETFLAG(block.Flags, BF_BlendUncompressed);
+		}
+	});
 
 	RecalculateMemoryUsage();
 }
@@ -264,11 +313,22 @@ Grid::PackedGrid* VoxelGrid::PackForSave() const
 {
 		std::unique_ptr<PackedGridImpl> pack(new PackedGridImpl);
 
-	uint offset = 0;
+	// Reserve the whole blob once instead of growing the vector for every
+	// small write (each resize would also zero the newly added bytes).
+	std::size_t totalSize = sizeof(CURRENT_FILE_VER) + 3 * sizeof(unsigned);
+	for (const auto& block : m_Blocks)
+	{
+		totalSize += 3 * sizeof(unsigned);
+		totalSize += sizeof(BlockFlags);
+		totalSize += block.DistanceData.size();
+		totalSize += block.MaterialData.size();
+		totalSize += block.BlendData.size();
+	}
+	pack->Data.resize(totalSize);
 
-	auto write = [&pack, &offset](const void* data, uint size) {
-		pack->Data.resize(pack->Data.size() + size);
-		::memcpy(&pack->Data[pack->Data.size() - size], (const char*)data, size);
+	std::size_t offset = 0;
+	auto write = [&pack, &offset](const void* data, std::size_t size) {
+		::memcpy(pack->Data.data() + offset, data, size);
 		offset += size;
 	};
 
@@ -299,9 +359,12 @@ Grid::PackedGrid* VoxelGrid::PackForSave() const
 	{
 		write(&block->Flags, sizeof(BlockFlags));
 
-		write(&block->DistanceData[0], block->DistanceData.size());
-		write(&block->MaterialData[0], block->MaterialData.size());
-		write(&block->BlendData[0], block->BlendData.size());
+		if (!block->DistanceData.empty())
+			write(&block->DistanceData[0], block->DistanceData.size());
+		if (!block->MaterialData.empty())
+			write(&block->MaterialData[0], block->MaterialData.size());
+		if (!block->BlendData.empty())
+			write(&block->BlendData[0], block->BlendData.size());
 	}
 
 	return pack.release();

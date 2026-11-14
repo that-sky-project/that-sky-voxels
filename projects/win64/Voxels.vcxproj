@@ -214,6 +214,7 @@
     <ClInclude Include="..\..\src\Internal.h" />
     <ClInclude Include="..\..\src\Logger.h" />
     <ClInclude Include="..\..\src\Memory.h" />
+    <ClInclude Include="..\..\src\ParallelFor.h" />
     <ClInclude Include="..\..\src\StdAllocatorAligned.h" />
     <ClInclude Include="..\..\src\StructConversions.h" />
     <ClInclude Include="..\..\src\TransVoxelImpl.h" />

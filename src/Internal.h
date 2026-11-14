@@ -32,3 +32,5 @@ extern Voxels::VoxelsDeallocateAligned_f voxel_dealloc_aligned;
 #include "Memory.h"
 
 #include "Logger.h"
+
+#include "ParallelFor.h"

@@ -32,6 +32,9 @@ public:
 	/// @param blend the blend values you need to fill.
 	/// Can be nullptr - in that case ignore the parameter.
 	/// values should be filled on the X, Y and Z axis in that order
+	/// @note Grid creation samples blocks in parallel, so GetSurface can be
+	/// called concurrently for different regions. Implementations must not
+	/// rely on mutable state shared between calls.
 	virtual void GetSurface(float xStart, float xEnd, float xStep,
 								float yStart, float yEnd, float yStep,
 								float zStart, float zEnd, float zStep,

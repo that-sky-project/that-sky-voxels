@@ -27,6 +27,9 @@ public:
 	/// Provides the material mapping for a specific material id
 	/// @param id the material id to map
 	/// @return a maping to texture ids
+	/// @note The polygonizer resolves vertices on several threads, so
+	/// GetMaterial may be called concurrently. Implementations must be safe
+	/// for concurrent reads.
 	virtual Material* GetMaterial(unsigned char id) const = 0;
 };
 
