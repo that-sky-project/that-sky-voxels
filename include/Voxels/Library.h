@@ -54,12 +54,12 @@ enum InitError
 /// @param allocators Collection of allocation/deallocation functions used by the library
 /// if nullptr than the default internal allocator will be used
 /// @return If the library was successfully initialized
-extern "C" VOXELS_API Voxels::InitError VOXELS_CDECL InitializeVoxels(int version, Voxels::LogMessage logger, Voxels::VoxelsAllocators* allocators);
+extern "C" VOXELS_API Voxels::InitError VOXELS_CALL InitializeVoxels(int version, Voxels::LogMessage logger, Voxels::VoxelsAllocators* allocators);
 
 /// Deinitializes the library
 ///
-extern "C" VOXELS_API void VOXELS_CDECL DeinitializeVoxels();
+extern "C" VOXELS_API void VOXELS_CALL DeinitializeVoxels();
 
 /// Returns the build version of the library
 ///
-extern "C" VOXELS_API unsigned VOXELS_CDECL GetBuildVersion();
+extern "C" VOXELS_API unsigned VOXELS_CALL GetBuildVersion();

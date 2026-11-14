@@ -5,13 +5,19 @@
 
 #ifdef _WIN32
 
+#ifdef VOXELS_DLL
 #ifdef VOXELS_EXPORT
 #define VOXELS_API __declspec(dllexport)
 #else
 #define VOXELS_API __declspec(dllimport)
 #endif
+#else
+#define VOXELS_API
+#endif
 
-#define VOXELS_CDECL __cdecl
+#ifndef VOXELS_CALL
+#define VOXELS_CALL __stdcall
+#endif
 
 #else
 
