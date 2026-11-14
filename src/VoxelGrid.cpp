@@ -4,7 +4,7 @@
 #include "stdafx.h"
 
 #include "VoxelGrid.h"
-#include "../include/VoxelSurface.h"
+#include "Voxels/VoxelSurface.h"
 #include <../dx11-framework/Utilities/MathInlines.h>
 
 #define SETFLAG(Flag, Bit) ((Flag) |= (Bit))

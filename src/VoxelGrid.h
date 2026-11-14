@@ -3,7 +3,7 @@
 // Voxels Library, please see LICENSE for licensing details.
 #pragma once
 
-#include "../include/Grid.h"
+#include "Voxels/Grid.h"
 
 namespace Voxels
 {

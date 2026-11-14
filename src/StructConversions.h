@@ -3,7 +3,7 @@
 // Voxels Library, please see LICENSE for licensing details.
 #pragma once
 
-#include "../include/Structs.h"
+#include "Voxels/Structs.h"
 
 namespace Voxels
 {

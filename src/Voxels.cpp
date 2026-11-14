@@ -3,8 +3,8 @@
 // Voxels Library, please see LICENSE for licensing details.
 #include "stdafx.h"
 
-#include "../include/Version.h"
-#include "../include/Library.h"
+#include "Voxels/Version.h"
+#include "Voxels/Library.h"
 #include "Logger.h"
 
 void* DefaultAllocate(size_t size)

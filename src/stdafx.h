@@ -23,8 +23,8 @@
 
 #include <profi_decls.h>
 #include <profi.h>
-#include "../include/Declarations.h"
-#include "../include/Library.h"
+#include "Voxels/Declarations.h"
+#include "Voxels/Library.h"
 
 extern Voxels::VoxelsAllocate_f voxel_allocate;
 extern Voxels::VoxelsDeallocate_f voxel_deallocate;

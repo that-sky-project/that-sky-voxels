@@ -3,7 +3,7 @@
 // Voxels Library, please see LICENSE for licensing details.
 #pragma once
 
-#include "../include/Library.h"
+#include "Voxels/Library.h"
 
 #define VOXLOG(SEVERITY, MSG) Voxels::Logger::Get()->Log(Voxels::SEVERITY, MSG)
 

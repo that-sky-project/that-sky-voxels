@@ -5,8 +5,8 @@
 #include "TransVoxelImpl.h"
 #include "Transvoxel.inl"
 
-#include "../include/MaterialMap.h"
-#include "../include/Grid.h"
+#include "Voxels/MaterialMap.h"
+#include "Voxels/Grid.h"
 
 #include <../dx11-framework/Utilities/MathInlines.h>
 
